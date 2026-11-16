@@ -1,0 +1,6 @@
+.git
+venv
+__pycache__
+laucher/build
+laucher/linux
+laucher/windows

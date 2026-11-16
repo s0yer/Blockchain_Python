@@ -1,5 +1,6 @@
 import json
-from pathlib import Path
+import math
+from caminhos import diretorio_dados
 
 import Hash_util
 from bloco import Bloco
@@ -7,7 +8,7 @@ from transacao import Transacao
 
 
 RECOMPENSA_MINERACAO = 100
-ARQUIVO_DADOS = Path("blockchain.txt")
+ARQUIVO_DADOS = diretorio_dados() / "blockchain.txt"
 
 blockchain = []
 transacao_aberta = []
@@ -87,13 +88,14 @@ def carrega_dados():
 
 
 def salvar_dados():
+    temporario = ARQUIVO_DADOS.with_suffix(".tmp")
     try:
-        with ARQUIVO_DADOS.open(mode="w", encoding="utf-8") as arq:
-            arq.write(json.dumps([_bloco_para_dict(bloco) for bloco in blockchain]))
-            arq.write("\n")
-            arq.write(json.dumps([tx.__dict__ for tx in transacao_aberta]))
-    except IOError:
-        return False
+        conteudo = json.dumps([_bloco_para_dict(bloco) for bloco in blockchain])
+        conteudo += "\n" + json.dumps([tx.__dict__ for tx in transacao_aberta])
+        temporario.write_text(conteudo, encoding="utf-8")
+        temporario.replace(ARQUIVO_DADOS)
+    except OSError as exc:
+        raise OSError("Não foi possível salvar a blockchain. Verifique as permissões do arquivo.") from exc
     return True
 
 
@@ -114,9 +116,12 @@ def prova_trabalho():
 
 
 def verifica_transacao(transacao):
-    if transacao.remetente == "MINERACAO":
-        return True
-    return obtem_saldo(transacao.remetente) >= transacao.valor
+    return (
+        _valor_valido(transacao.valor)
+        and bool(transacao.destinatario.strip())
+        and transacao.remetente != "MINERACAO"
+        and obtem_saldo(transacao.remetente) >= 0
+    )
 
 
 def obtem_saldo(participante):
@@ -137,6 +142,8 @@ def obtem_saldo(participante):
 
 
 def mine_block():
+    if not verifica_chave() or not verifica_trasacoes():
+        return False
     ultimo_bloco = blockchain[-1]
     hash_anterior = Hash_util.hash_bloco(ultimo_bloco)
     prova = prova_trabalho()
@@ -145,9 +152,15 @@ def mine_block():
 
     bloco = Bloco(len(blockchain), hash_anterior, transacoes_bloco, prova)
     blockchain.append(bloco)
+    pendentes = transacao_aberta[:]
     transacao_aberta.clear()
+    try:
+        salvar_dados()
+    except OSError:
+        blockchain.pop()
+        transacao_aberta.extend(pendentes)
+        raise
     _atualiza_participantes()
-    salvar_dados()
     return True
 
 
@@ -157,13 +170,27 @@ def obtem_ultimo_valor():
     return blockchain[-1]
 
 
-def add_transacao(destinatario, remetente=proprietario, valor=1.0):
-    transacao = Transacao(remetente, destinatario, valor)
+def _valor_valido(valor):
+    return isinstance(valor, (int, float)) and not isinstance(valor, bool) and math.isfinite(valor) and valor > 0
+
+
+def add_transacao(destinatario, remetente=None, valor=1.0):
+    remetente = proprietario if remetente is None else remetente
+    if (not isinstance(destinatario, str) or not destinatario.strip()
+            or not isinstance(remetente, str) or not remetente.strip()
+            or remetente == "MINERACAO" or remetente == destinatario.strip()
+            or not _valor_valido(valor) or obtem_saldo(remetente) < valor):
+        return False
+    transacao = Transacao(remetente, destinatario.strip(), valor)
     if not verifica_transacao(transacao):
         return False
     transacao_aberta.append(transacao)
+    try:
+        salvar_dados()
+    except OSError:
+        transacao_aberta.pop()
+        raise
     _atualiza_participantes()
-    salvar_dados()
     return True
 
 
@@ -185,13 +212,25 @@ def imprime_blockchain():
 
 
 def verifica_chave():
-    for indice, bloco in enumerate(blockchain):
-        if indice == 0:
-            continue
-        if bloco.hash_anterior != Hash_util.hash_bloco(blockchain[indice - 1]):
+    if not blockchain or _bloco_para_dict(blockchain[0]) != _bloco_para_dict(Bloco(0, "", [], 100, 0)):
+        return False
+    saldos = {}
+    for indice, bloco in enumerate(blockchain[1:], 1):
+        if bloco.indice != indice or bloco.hash_anterior != Hash_util.hash_bloco(blockchain[indice - 1]):
             return False
-        if not prova_validade(bloco.transacoes[:-1], bloco.hash_anterior, bloco.prova):
+        if not bloco.transacoes or not prova_validade(bloco.transacoes[:-1], bloco.hash_anterior, bloco.prova):
             return False
+        recompensa = bloco.transacoes[-1]
+        if (recompensa.remetente != "MINERACAO" or recompensa.valor != RECOMPENSA_MINERACAO
+                or not recompensa.destinatario.strip()):
+            return False
+        for tx in bloco.transacoes[:-1]:
+            if (not _valor_valido(tx.valor) or not tx.destinatario.strip()
+                    or tx.remetente == "MINERACAO" or saldos.get(tx.remetente, 0) < tx.valor):
+                return False
+            saldos[tx.remetente] -= tx.valor
+            saldos[tx.destinatario] = saldos.get(tx.destinatario, 0) + tx.valor
+        saldos[recompensa.destinatario] = saldos.get(recompensa.destinatario, 0) + recompensa.valor
     return True
 
 

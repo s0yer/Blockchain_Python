@@ -3,3 +3,14 @@ __pycache__/
 venv/
 .idea/
 .vs/
+
+# Progresso pessoal na trilha
+progresso.json
+progresso.tmp
+
+# Arquivos intermediários de empacotamento
+laucher/build/
+laucher/linux/blockchain.txt
+laucher/windows/blockchain.txt
+laucher/linux/progresso.json
+laucher/windows/progresso.json

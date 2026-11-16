@@ -1,0 +1,11 @@
+FROM ubuntu:24.04 AS wine-base
+ENV DEBIAN_FRONTEND=noninteractive WINEDEBUG=-all WINEARCH=win64 WINEPREFIX=/opt/wine
+RUN apt-get update && apt-get install -y --no-install-recommends wine64 wine xvfb xauth wget ca-certificates && rm -rf /var/lib/apt/lists/*
+RUN dpkg --add-architecture i386 && apt-get update && apt-get install -y --no-install-recommends wine32 && rm -rf /var/lib/apt/lists/*
+RUN xvfb-run -a sh -c 'wineboot --init; wineserver -w; wine reg add "HKCU\\Software\\Wine" /v Version /d win10 /f; wineserver -w'
+FROM wine-base AS final
+RUN mkdir /tmp/python-msi && for component in core exe lib tcltk pip; do \
+    wget -q "https://www.python.org/ftp/python/3.12.10/amd64/$component.msi" -O "/tmp/python-msi/$component.msi"; done
+RUN xvfb-run -a sh -c 'for component in core exe lib tcltk pip; do wine msiexec /i "Z:\\tmp\\python-msi\\$component.msi" /qn "TARGETDIR=C:\\Python" || exit; done; wineserver -w'
+RUN xvfb-run -a wine 'C:\Python\python.exe' -m pip install pyinstaller==6.22.3
+WORKDIR /src

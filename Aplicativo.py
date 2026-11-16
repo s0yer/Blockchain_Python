@@ -1,3 +1,5 @@
+import tkinter as tk
+
 import Funcoes
 from interface_grafica import iniciar_interface
 
@@ -55,6 +57,6 @@ def executar_console():
 if __name__ == "__main__":
     try:
         iniciar_interface()
-    except Exception:
+    except tk.TclError:
         # Fallback para modo texto caso a GUI falhe.
         executar_console()
